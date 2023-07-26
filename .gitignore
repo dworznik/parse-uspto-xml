@@ -3,3 +3,7 @@
 config/**
 *.tsv
 **/__pycache__/**
+.vscode
+.history
+data
+.env
