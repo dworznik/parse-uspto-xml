@@ -10,7 +10,7 @@ utils_path = os.path.abspath('utils')
 sys.path.append(utils_path)
 
 # load the psycopg to connect to postgresql
-from db_interface import PGDBInterface
+from utils.db_interface import PGDBInterface
 
 def print_lines(text):
     """
