@@ -73,8 +73,8 @@ SELECT pg_size_pretty(pg_database_size('uspto_patents'));
 
 **PostgreSQL Database**
 
-    * DATABASE_HOSTNAME - Hostname the instance
+    * DATABASE_HOST - Hostname the instance
     * DATABASE_NAME - Name of the database
-    * DATABASE_USERNAME - Username for database
-    * DATABASE_PASSWORD - Password for database
+    * DATABASE_USER - Username for database
+    * DATABASE_PASS - Password for database
     * DATABASE_PORT - Port to access database
