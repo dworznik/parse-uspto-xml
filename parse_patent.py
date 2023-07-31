@@ -137,7 +137,7 @@ def parse_uspto_file(bs, logging=False):
     return uspto_patent
 
 
-def write_to_db(uspto_patent, db=None):    
+def write_to_db(uspto_patent, table='uspto_patents', db=None):    
 
     """
     pp = pprint.PrettyPrinter(indent=2)
@@ -198,7 +198,7 @@ def write_to_db(uspto_patent, db=None):
     
     if db_cursor is not None:
 
-        db_cursor.execute("INSERT INTO uspto_patents ("
+        db_cursor.execute("INSERT INTO " + table + " ("
                           + "publication_title, publication_number, "
                           + "publication_date, publication_type, " 
                           + "authors, sections, section_classes, " 
@@ -252,8 +252,11 @@ db_config_file = "config/postgres.tsv"
 db = PGDBInterface(config_file=db_config_file)
 db.silent_logging = True
     
+publication_types = os.environ['PUBLICATION_TYPES'].split(',')
+
 count = 1
 success_count = 0
+skip_count = 0
 errors = []
 for filename in filenames:
     if ".xml" in filename:
@@ -282,15 +285,20 @@ for filename in filenames:
 
             try:
                 uspto_patent = parse_uspto_file(application)
-                write_to_db(uspto_patent, db=db)
+                if publication_types is not None:
+                    if uspto_patent['application_type'] not in publication_types:
+                        skip_count += 1
+                        count += 1
+                        continue
+                write_to_db(uspto_patent, table='uspto_grants', db=db)
                 success_count += 1
             except Exception as e:
                 exception_tuple = (count, title, e)
                 errors.append(exception_tuple)
                 print(exception_tuple)
        
-            if (success_count+len(errors)) % 50 == 0:
-                print(count, filename, title)
+            if (success_count+ skip_count + len(errors)) % 50 == 0:
+                print(count, success_count, skip_count, len(errors), filename, title)
                 db.commit_to_db()
             count += 1
 
@@ -300,4 +308,5 @@ for e in errors:
     print(e)
     
 print("Success Count:", success_count)
+print("Skip Count:", skip_count)
 print("Error Count:", len(errors))
