@@ -3,6 +3,8 @@ import os
 import sys
 import html
 import datetime
+import zipfile
+from io import BytesIO
 
 from bs4 import BeautifulSoup
 
@@ -55,13 +57,31 @@ def parse_uspto_file(bs, logging=False):
             section_class_subclasses[classification] = True
             section_class_subclass_groups[classification+" "+group] = True
             
-    authors = []
-    for parties in bs.find_all('parties'):
-        for applicants in parties.find_all('applicants'):
-            for el in applicants.find_all('addressbook'):
-                first_name = el.find('first-name').text
-                last_name = el.find('last-name').text
-                authors.append(first_name + " " + last_name)
+    applicants = []
+    for parties in bs.find_all('us-parties'):
+        for applicants_el in parties.find_all('us-applicants'):
+            for el in applicants_el.find_all('addressbook'):
+                first_name = el.find('first-name')
+                last_name = el.find('last-name')
+                orgname = el.find('orgname')
+                if last_name is not None and first_name is not None:
+                    applicants.append(first_name.text + " " + last_name.text)
+                elif orgname is not None:
+                    applicants.append(orgname.text)
+
+
+    inventors = []
+    for parties in bs.find_all('us-parties'):
+        for inventors_el in parties.find_all('inventors'):
+            for el in inventors_el.find_all('addressbook'):
+                first_name = el.find('first-name')
+                last_name = el.find('last-name')
+                orgname = el.find('orgname')
+                if last_name is not None and first_name is not None:
+                    inventors.append(first_name.text + " " + last_name.text)
+                elif orgname is not None:
+                    inventors.append(orgname.text)
+
 
     abstracts = []
     for el in bs.find_all('abstract'):
@@ -80,7 +100,8 @@ def parse_uspto_file(bs, logging=False):
         "publication_number": publication_num,
         "publication_date": publication_date,
         "application_type": application_type,
-        "authors": authors, # list
+        "applicants": applicants, # list
+        "inventors": inventors, # list
         "sections": list(sections.keys()),
         "section_classes": list(section_classes.keys()),
         "section_class_subclasses": list(section_class_subclasses.keys()),
@@ -110,7 +131,7 @@ def parse_uspto_file(bs, logging=False):
         print("\n")
         
         count = 1
-        for author in authors:
+        for author in applicants:
             print("Inventor #"+str(count)+": " + author)
             count += 1
 
@@ -137,7 +158,7 @@ def parse_uspto_file(bs, logging=False):
     return uspto_patent
 
 
-def write_to_db(uspto_patent, table='uspto_patents', db=None):    
+def write_to_db(uspto_patent, table, db=None):    
 
     """
     pp = pprint.PrettyPrinter(indent=2)
@@ -164,11 +185,12 @@ def write_to_db(uspto_patent, table='uspto_patents', db=None):
         uspto_patent['publication_number'],
         uspto_patent['publication_date'],
         uspto_patent['application_type'],
-        ','.join(uspto_patent['authors']),
-        ','.join(uspto_patent['sections']),
-        ','.join(uspto_patent['section_classes']),
-        ','.join(uspto_patent['section_class_subclasses']),
-        ','.join(uspto_patent['section_class_subclass_groups']),
+        uspto_patent['applicants'],
+        uspto_patent['inventors'],
+        uspto_patent['sections'],
+        uspto_patent['section_classes'],
+        uspto_patent['section_class_subclasses'],
+        uspto_patent['section_class_subclass_groups'],
         '\n'.join(uspto_patent['abstract']),
         '\n'.join(uspto_patent['descriptions']),
         '\n'.join(uspto_patent['claims']),
@@ -181,11 +203,12 @@ def write_to_db(uspto_patent, table='uspto_patents', db=None):
         uspto_patent['publication_title'],
         uspto_patent['publication_date'],
         uspto_patent['application_type'],
-        ','.join(uspto_patent['authors']),
-        ','.join(uspto_patent['sections']),
-        ','.join(uspto_patent['section_classes']),
-        ','.join(uspto_patent['section_class_subclasses']),
-        ','.join(uspto_patent['section_class_subclass_groups']),
+        uspto_patent['applicants'],
+        uspto_patent['inventors'],
+        uspto_patent['sections'],
+        uspto_patent['section_classes'],
+        uspto_patent['section_class_subclasses'],
+        uspto_patent['section_class_subclass_groups'],
         '\n'.join(uspto_patent['abstract']),
         '\n'.join(uspto_patent['descriptions']),
         '\n'.join(uspto_patent['claims']),
@@ -197,24 +220,23 @@ def write_to_db(uspto_patent, table='uspto_patents', db=None):
         db_cursor = db.obtain_db_cursor()
     
     if db_cursor is not None:
-
         db_cursor.execute("INSERT INTO " + table + " ("
                           + "publication_title, publication_number, "
                           + "publication_date, publication_type, " 
-                          + "authors, sections, section_classes, " 
+                          + "applicants, inventors, sections, section_classes, " 
                           + "section_class_subclasses, "
                           + "section_class_subclass_groups, "
                           + "abstract, description, claims, "
                           + "created_at, updated_at"
                           + ") VALUES ("
                           + "%s, %s, %s, %s, %s, %s, %s, %s, "
-                          + "%s, %s, %s, %s, %s, %s) "
+                          + "%s, %s, %s, %s, %s, %s, %s) "
                           + "ON CONFLICT(publication_number) "
                           + "DO UPDATE SET "
                           + "publication_title=%s, "
                           + "publication_date=%s, "
                           + "publication_type=%s, "
-                          + "authors=%s, "
+                          + "applicants=%s, inventors=%s, "
                           + "sections=%s, section_classes=%s, "
                           + "section_class_subclasses=%s, "
                           + "section_class_subclass_groups=%s, "
@@ -222,7 +244,20 @@ def write_to_db(uspto_patent, table='uspto_patents', db=None):
                           + "claims=%s, updated_at=%s", uspto_db_entry)
 
     return 
-    
+
+def read_zip_file(zip_filename):
+    # Construct the internal filename based on the zip filename
+    bname = os.path.basename(zip_filename)        
+    internal_filename = bname.rsplit('.', 1)[0].rsplit('_', 1)[0] + '.xml'
+    with open(zip_filename, 'rb') as file:
+        with zipfile.ZipFile(BytesIO(file.read())) as z:
+            if internal_filename in z.namelist():
+                with z.open(internal_filename, 'r') as f:
+                    content = f.read()  # Read the content as bytes
+                    return content
+            else:
+                print(f"{internal_filename} not found in {zip_filename}")
+                return None
 
 arg_filenames = []
 if len(sys.argv) > 1:
@@ -240,7 +275,7 @@ for filename in arg_filenames:
             filenames.append(directory + dir_filename)                
                 
     # Load listed files
-    if ".xml" in filename:
+    if ".zip" in filename:
         filenames.append(filename)
 
 print("LOADING FILES TO PARSE\n----------------------------")
@@ -252,52 +287,60 @@ db_config_file = "config/postgres.tsv"
 db = PGDBInterface(config_file=db_config_file)
 db.silent_logging = True
     
-publication_types = os.environ['PUBLICATION_TYPES'].split(',')
+publication_types = None
+if 'PUBLICATION_TYPES' in os.environ:
+    publication_types =os.environ['PUBLICATION_TYPES'].split(',')
 
 count = 1
 success_count = 0
 skip_count = 0
 errors = []
 for filename in filenames:
-    if ".xml" in filename:
-        
-        xml_text = html.unescape(open(filename, 'r').read())
+    if ".zip" in filename:
+        try:
+            content = read_zip_file(filename)
+            xml_text = html.unescape(content.decode('utf-8'))
+        except Exception as e:
+                print('dupa')
+                exception_tuple = (count, filename, e)
+                errors.append(exception_tuple)
+                print(exception_tuple)
+                continue
         
         for patent in xml_text.split("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"):
 
             if patent is None or patent == "":
                 continue
-    
-            bs = BeautifulSoup(patent)
 
-            if bs.find('sequence-cwu') is not None:
-                continue # Skip DNA sequence documents
+            try:    
+                bs = BeautifulSoup(patent)
+                
+                if bs.find('sequence-cwu') is not None:
+                    continue # Skip DNA sequence documents
     
-            application = bs.find('us-patent-application')
-            if application is None: # If no application, search for grant
-                application = bs.find('us-patent-grant')
-            title = "None"
+                application = bs.find('us-patent-application')
+                if application is None: # If no application, search for grant
+                    application = bs.find('us-patent-grant')
+                title = "None"
     
-            try:
                 title = application.find('invention-title').text
-            except Exception as e:          
-                print("Error", count, e)
 
-            try:
                 uspto_patent = parse_uspto_file(application)
+                
                 if publication_types is not None:
                     if uspto_patent['application_type'] not in publication_types:
                         skip_count += 1
                         count += 1
                         continue
-                write_to_db(uspto_patent, table='uspto_grants', db=db)
+                
+                write_to_db(uspto_patent, table='uspto_applications', db=db)
                 success_count += 1
             except Exception as e:
                 exception_tuple = (count, title, e)
                 errors.append(exception_tuple)
                 print(exception_tuple)
        
-            if (success_count+ skip_count + len(errors)) % 50 == 0:
+            if (success_count + skip_count + len(errors)) % 50 == 0:
                 print(count, success_count, skip_count, len(errors), filename, title)
                 db.commit_to_db()
             count += 1
